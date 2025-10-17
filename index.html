@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Monitor de Fluxo — Demo (HTML único)</title>
+<style>
+  :root { --bg:#f3f4f6; --panel:#fff; --primary-600:#2563eb; --muted:#6b7280; --text:#111827; }
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Arial;color:var(--text)}
+  .app{display:flex;min-height:100vh}.sidebar{width:260px;background:#0b2a6b;color:#fff;padding:20px;display:flex;flex-direction:column;gap:12px}
+  .title{text-align:center;font-weight:700;font-size:18px}.seg{display:flex;gap:8px;justify-content:center}
+  .seg button{border:1px solid #184089;background:#14357a;color:#fff;padding:6px 10px;border-radius:10px;cursor:pointer;font-size:13px}
+  .seg button.active{background:#2563eb;border-color:#2563eb}.list{overflow-y:auto;max-height:calc(100vh - 160px);padding-right:2px}
+  .item{width:100%;text-align:left;padding:10px 12px;border-radius:10px;border:1px solid #1a3c84;background:#133374;color:#fff;cursor:pointer;margin-bottom:8px}
+  .item.active,.item:hover{background:#1f4aa5}.main{flex:1;padding:24px;display:flex;justify-content:center}
+  .card{background:var(--panel);border-radius:14px;padding:16px;box-shadow:0 4px 14px rgba(0,0,0,.06);max-width:960px;width:100%}
+  .placeholder{height:70vh;display:grid;place-items:center;color:var(--muted)}.header{display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center;margin-bottom:12px}
+  .subtitle{color:var(--muted);font-size:14px}.pill{display:inline-flex;border:1px solid #d1d5db;border-radius:999px;overflow:hidden}
+  .pill button{padding:6px 12px;font-size:13px;border:0;background:#fff;cursor:pointer}.pill button.active{background:var(--primary-600);color:#fff}
+  .stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.stat{background:#eef2ff;border-radius:10px;padding:12px}
+  .stat h4{margin:0 0 6px 0;font-size:14px;color:#1f3a8a}.stat .v{font-size:22px;font-weight:700;color:#1e40af}.section{margin-top:14px}
+  .legend{display:flex;align-items:center;gap:8px;margin-top:8px}.legend .bar{height:8px;flex:1;border-radius:6px;background:linear-gradient(90deg,rgb(255,255,224)0%,rgb(255,200,0)33%,rgb(255,60,0)66%,rgb(50,0,0)100%)}
+  .video-wrap{margin-top:14px}.btn{padding:10px 14px;background:var(--primary-600);color:#fff;border:0;border-radius:10px;cursor:pointer}
+  .muted{color:var(--muted);font-size:12px}.video-box{background:#000;color:#fff;border-radius:12px;padding:8px}.topbar{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .chip{background:#e5e7eb;padding:2px 8px;border-radius:999px;font-size:12px}canvas{display:block;width:100%;height:220px;background:#fff;border-radius:10px}
+  /* Heatmap estilo barra contínua com rótulos */
+  .heatbar { display:grid; grid-template-rows: 48px 16px; row-gap: 6px; }
+  .heat-row { display:grid; gap:2px; }
+  .heat-labels { display:grid; gap:2px; font-size:10px; color:#6b7280; text-align:center; }
+  @media(max-width:900px){.stats{grid-template-columns:1fr}.sidebar{width:220px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="title">Monitor de Fluxo</div>
+    <div class="seg">
+      <button id="btnTerminais" class="active">Terminais</button>
+      <button id="btnEstacoes">Estações</button>
+    </div>
+    <div id="list" class="list"></div>
+  </aside>
+
+  <main class="main">
+    <div id="placeholder" class="placeholder"><div>Selecione um terminal ou estação ao lado</div></div>
+    <div id="panel" class="card" style="display:none;">
+      <div class="header">
+        <div>
+          <div id="nome" style="font-weight:800;font-size:20px;">—</div>
+          <div class="subtitle"><span id="statusDia">Atualizado em tempo real</span> · <span id="dataLabel">--/--/----</span></div>
+        </div>
+        <div class="pill"><button id="pillHoje" class="active">Hoje</button><button id="pillOntem">Ontem</button></div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><h4>Indice Médio</h4><div class="v" id="fluxoTotal">0</div></div>
+        <div class="stat"><h4>Índice Atual</h4><div class="v" id="indiceAtual">1</div></div>
+      </div>
+
+      <div class="section">
+        <h3>Fluxo por Hora</h3>
+        <canvas id="lineChart" width="900" height="220"></canvas>
+      </div>
+
+      <div class="section">
+        <h3>Mapa de Calor — Fluxo por Hora (pico = escuro)</h3>
+        <div id="heatbar" class="heatbar"></div>
+        <div class="legend"><span class="muted">baixo</span><div class="bar"></div><span class="muted">alto</span></div>
+      </div>
+
+      <div class="section video-wrap">
+        <button id="btnLive" class="btn">Ver ao vivo</button>
+        <div id="liveBlock" style="display:none;margin-top:8px;">
+          <div class="topbar">
+            <span class="chip">Live</span>
+            <span class="muted">Selecione um arquivo .mp4 local para a demo (opcional):</span>
+            <input id="filePicker" type="file" accept="video/mp4" />
+          </div>
+          <!-- ⚠️ videoBox agora envolve o <video> e permite trocar para <iframe> (Drive) -->
+          <div class="video-box" id="videoBox">
+            <video id="video" width="100%" height="360" controls muted playsinline></video>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+/* --------- Lista e UI --------- */
+const MOCK={terminais:[{id:1,nome:'Terminal Alvorada'},{id:2,nome:'Terminal Campo Grande'},{id:3,nome:'Terminal Madureira'}],estacoes:[{id:4,nome:'Estação Central'},{id:5,nome:'Estação Tijuca'}]};
+let categoria='terminais',ativo=null,diaAnterior=false,contagemAtual=0;
+function fmtBRDate(d){return d.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'})}
+function heatColor(v){const c=[[255,255,224],[255,200,0],[255,60,0],[50,0,0]];const i=Math.min(c.length-1,Math.floor(v*(c.length-1)));return`rgb(${c[i][0]},${c[i][1]},${c[i][2]})`}
+function indiceDe(x){return x<=20?1:x<=100?2:x<=300?3:x<=999?4:5}
+const list=document.getElementById('list'),btnT=document.getElementById('btnTerminais'),btnE=document.getElementById('btnEstacoes');
+function renderList(){list.innerHTML='';const arr=categoria==='terminais'?MOCK.terminais:MOCK.estacoes;arr.forEach(it=>{const b=document.createElement('button');b.className='item'+(ativo&&ativo.id===it.id?' active':'');b.textContent=it.nome;b.onclick=()=>{ativo=it;diaAnterior=false;document.getElementById('pillHoje').classList.add('active');document.getElementById('pillOntem').classList.remove('active');renderList();openPanel();};list.appendChild(b);})}
+btnT.onclick=()=>{categoria='terminais';btnT.classList.add('active');btnE.classList.remove('active');renderList()}
+btnE.onclick=()=>{categoria='estacoes';btnE.classList.add('active');btnT.classList.remove('active');renderList()}
+renderList();
+
+const placeholder=document.getElementById('placeholder'),panel=document.getElementById('panel'),nome=document.getElementById('nome'),statusDia=document.getElementById('statusDia'),dataLabel=document.getElementById('dataLabel'),fluxoTotal=document.getElementById('fluxoTotal'),indiceAtual=document.getElementById('indiceAtual'),pillHoje=document.getElementById('pillHoje'),pillOntem=document.getElementById('pillOntem'),heatbar=document.getElementById('heatbar'),ctx=document.getElementById('lineChart').getContext('2d');
+
+function openPanel(){placeholder.style.display='none';panel.style.display='block';nome.textContent=ativo.nome;updateDateUI();simulateAndRender();}
+function updateDateUI(){const h=new Date(),o=new Date(Date.now()-864e5);const ex=diaAnterior?o:h;dataLabel.textContent=fmtBRDate(ex);statusDia.textContent=diaAnterior?'Exibindo dia anterior':'Atualizado em tempo real';}
+pillHoje.onclick=()=>{if(diaAnterior){diaAnterior=false;pillHoje.classList.add('active');pillOntem.classList.remove('active');simulateAndRender();updateDateUI();}}
+pillOntem.onclick=()=>{if(!diaAnterior){diaAnterior=true;pillOntem.classList.add('active');pillHoje.classList.remove('active');simulateAndRender();updateDateUI();}}
+
+function genData(){const h=new Date().getHours();const len=diaAnterior?24:h+1;const d=[];for(let i=0;i<len;i++){d.push({hora:String(i).padStart(2,'0')+':00',pessoas:Math.floor(Math.random()*1000)});}return d}
+let hourly=[];
+
+function drawChart(d){
+  ctx.clearRect(0,0,900,220);
+  const W=900,H=220,mL=36,mR=10,mT=10,mB=24,pW=W-mL-mR,pH=H-mT-mB;
+  const minY = 1, maxY = 5;
+
+  // Moldura
+  ctx.strokeStyle='#e5e7eb';
+  ctx.strokeRect(mL,mT,pW,pH);
+
+  // Grid + labels Y (1..5)
+  ctx.fillStyle='#6b7280';
+  ctx.font='12px sans-serif';
+  for (let y=minY; y<=maxY; y++){
+    const py = mT + pH - ((y-minY)/(maxY-minY))*pH;
+    ctx.beginPath(); ctx.moveTo(mL,py); ctx.lineTo(mL+pW,py); ctx.stroke();
+    ctx.fillText(String(y), 4, py+4);
+  }
+
+  // Linha do ÍNDICE (derivado de pessoas)
+  ctx.strokeStyle='#2563eb';
+  ctx.beginPath();
+  d.forEach((v,i)=>{
+    const indice = indiceDe(v.pessoas);         // 1..5
+    const x = mL + (i/(d.length-1||1))*pW;
+    const y = mT + pH - ((indice-minY)/(maxY-minY))*pH;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  // Rótulos do eixo X (hora)
+  ctx.fillStyle='#6b7280';
+  d.forEach((v,i)=>{
+    if(i%2===0 || i===d.length-1){
+      const x = mL + (i/(d.length-1||1))*pW;
+      ctx.fillText(v.hora.slice(0,2), x-6, H-6);
+    }
+  });
+}
+
+function renderHeat(d){
+  heatbar.innerHTML='';
+  const cols=d.length;
+  const row=document.createElement('div');row.className='heat-row';row.style.gridTemplateColumns=`repeat(${cols}, minmax(0,1fr))`;
+  const labels=document.createElement('div');labels.className='heat-labels';labels.style.gridTemplateColumns=`repeat(${cols}, minmax(0,1fr))`;
+  const max=Math.max(...d.map(x=>x.pessoas))||1;
+  d.forEach(v=>{
+    const cell=document.createElement('div');
+    cell.style.background=heatColor(v.pessoas/max);cell.style.borderRadius='4px';cell.title=`${v.hora} — ${v.pessoas} pessoas`;
+    row.appendChild(cell);
+    const lab=document.createElement('div');lab.textContent=v.hora.slice(0,2);labels.appendChild(lab);
+  });
+  heatbar.appendChild(row);heatbar.appendChild(labels);
+}
+
+function simulateAndRender(){
+  hourly = genData();
+  const indices = hourly.map(x => indiceDe(x.pessoas));
+  const soma = indices.reduce((a,b)=> a + b, 0);
+  const media = (soma / (indices.length || 1));
+  fluxoTotal.textContent = media.toFixed(1);
+  const indiceAtualVal = indices[indices.length - 1];
+  indiceAtual.textContent = String(indiceAtualVal);
+  drawChart(hourly);
+  renderHeat(hourly);
+}
+
+setInterval(()=>{
+  if(!ativo || diaAnterior) return;
+  const h = new Date().getHours();
+  if(hourly.length && hourly.length-1 === h){
+    hourly[hourly.length-1].pessoas = Math.floor(Math.random()*1000);
+    const indices = hourly.map(x => indiceDe(x.pessoas));
+    const soma = indices.reduce((a,b)=> a + b, 0);
+    const media = (soma / (indices.length || 1));
+    fluxoTotal.textContent = media.toFixed(1);
+    const indiceAtualVal = indices[indices.length - 1];
+    indiceAtual.textContent = String(indiceAtualVal);
+    drawChart(hourly);
+    renderHeat(hourly);
+  }
+}, 4000);
+
+/* --------- Vídeo: Drive preview (iframe) ou MP4 direto (video) --------- */
+const btnLive = document.getElementById('btnLive'),
+      live    = document.getElementById('liveBlock'),
+      picker  = document.getElementById('filePicker'),
+      box     = document.getElementById('videoBox');
+
+// URL alvo (Drive com /preview OU MP4 direto)
+const VIDEO_URL = 'https://drive.google.com/file/d/1m1Mk8OyLEznu2cRLqbWIUY2nv6eLQoym/preview';
+// Exemplo MP4 direto para teste rápido:
+// const VIDEO_URL = 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4';
+
+function tocarURL(url){
+  // Se for Drive, embeda iframe de preview
+  if (url.includes('drive.google.com')) {
+    const preview = url.includes('/preview') ? url : url.replace('/view', '/preview');
+    box.innerHTML = `
+      <iframe
+        id="drivePlayer"
+        src="${preview}"
+        width="100%" height="360" allow="autoplay"
+        style="border:0;border-radius:12px;overflow:hidden"
+      ></iframe>`;
+    return;
+  }
+
+  // Caso contrário, usa <video> com MP4 direto
+  if (!box.querySelector('video')) {
+    box.innerHTML = '<video id="video" width="100%" height="360" controls muted playsinline></video>';
+  }
+  const v = box.querySelector('video');
+  v.muted = true;
+  v.src = url;
+  v.load();
+  v.play().catch(() => console.debug('Autoplay bloqueado. Clique em play.'));
+  v.onerror = () => alert('Falha ao carregar o vídeo. Verifique se a URL é um .mp4 público.');
+}
+
+btnLive.onclick = () => {
+  const abrir = live.style.display === 'none';
+  live.style.display = abrir ? 'block' : 'none';
+  if (abrir) {
+    tocarURL(VIDEO_URL);
+  } else {
+    const v = box.querySelector('video');
+    if (v) v.pause();
+  }
+};
+
+// Arquivo local continua funcionando
+picker.onchange = e => {
+  const f = e.target.files[0];
+  if (f) {
+    box.innerHTML = '<video id="video" width="100%" height="360" controls muted playsinline></video>';
+    const v = box.querySelector('video');
+    v.muted = true;
+    v.src = URL.createObjectURL(f);
+    v.load();
+    v.play().catch(()=>{});
+  }
+};
+</script>
+</body>
+</html>
